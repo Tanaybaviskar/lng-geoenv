@@ -1,54 +1,14 @@
 import numpy as np
 from src.lng_geoenv.env import LNGEnv
-from src.lng_geoenv.demand import DemandGenerator
-from src.lng_geoenv.reward import RewardEngine
 from src.lng_geoenv.tasks import get_task_config
 
 
-def generate_demand(seed=42, max_steps=10):
-    np.random.seed(seed)
-    demand_gen = DemandGenerator()
-    demand_forecast = [demand_gen.step() for _ in range(max_steps)]
-    return demand_forecast
-
-
-def compute_reward(state, demand, reward_engine):
-    storage_level = state.get("storage", {}).get("level", 0.0)
-    ships = state.get("ships", [])
-    blocked_routes = state.get("blocked_routes", [])
-
-    incoming = sum(
-        ship.get("capacity", 0)
-        for ship in ships
-        if ship.get("eta", 999) <= 1 and ship.get("status") == "moving"
-    )
-    supply = storage_level + incoming
-    deficit = max(0, demand - supply)
-
-    fuel_cost = sum(len(ship.get("route", "")) * 0.1 for ship in ships)
-    storage_cost = 0.02 * storage_level
-    hedge_cost = 0  
-
-    delay = sum(max(0, ship.get("eta", 0)) for ship in ships)
-    risk = 0.1 * len(blocked_routes)
-    cargo_value = supply
-
-    reward, components = reward_engine.compute(
-        {
-            "fuel_cost": fuel_cost,
-            "storage_cost": storage_cost,
-            "hedge_cost": hedge_cost,
-            "deficit": deficit,
-            "delay": delay,
-            "risk": risk,
-            "cargo_value": cargo_value,
-        }
-    )
-
-    return reward, components
-
-
 def choose_action(state, demand):
+    """
+    Baseline agent policy.
+    Returns actions in format: {"type": str, "parameters": dict}
+    Ensures all ship_ids are valid and parameters are bounded.
+    """
     storage_level = state.get("storage", {}).get("level", 0.0)
     storage_capacity = state.get("storage", {}).get("capacity", 200.0)
     price = state.get("price", 100.0)
@@ -56,50 +16,55 @@ def choose_action(state, demand):
     ships = state.get("ships", [])
     blocked_routes = state.get("blocked_routes", [])
 
+    valid_routes = ["Suez", "Panama", "Atlantic", "Hormuz"]
+    available_routes = [r for r in valid_routes if r not in blocked_routes]
+
+    # Shortage handling: prioritize reroutes for blocked ships
     if storage_level < demand:
         shortage_amount = demand - storage_level
 
         for ship in ships:
-            if ship.get("route") in blocked_routes:
-                available_routes = [
-                    r
-                    for r in ["Suez", "Panama", "Atlantic", "Hormuz"]
-                    if r not in blocked_routes
-                ]
+            ship_id = ship.get("id")
+            if ship_id is not None and ship.get("route") in blocked_routes:
                 if available_routes:
                     new_route = available_routes[0]
                     return {
                         "type": "reroute",
                         "parameters": {
-                            "ship_id": ship.get("id"),
+                            "ship_id": ship_id,
                             "new_route": new_route,
                         },
                     }
 
+        # Release storage if available
         if storage_level > 0:
             release_amount = min(shortage_amount * 0.8, storage_level)
+            release_amount = max(0.0, release_amount)
             return {"type": "release", "parameters": {"amount": release_amount}}
 
+    # Reroute ships on blocked routes (defensive)
     for ship in ships:
-        if ship.get("route") in blocked_routes and ship.get("status") == "moving":
-            available_routes = [
-                r
-                for r in ["Suez", "Panama", "Atlantic", "Hormuz"]
-                if r not in blocked_routes
-            ]
+        ship_id = ship.get("id")
+        if (
+            ship_id is not None
+            and ship.get("route") in blocked_routes
+            and ship.get("status") == "moving"
+        ):
             if available_routes:
                 new_route = available_routes[0]
                 return {
                     "type": "reroute",
-                    "parameters": {"ship_id": ship.get("id"), "new_route": new_route},
+                    "parameters": {"ship_id": ship_id, "new_route": new_route},
                 }
 
+    # Hedge when conditions are favorable
     if price > 120 and budget >= 10:
         return {"type": "hedge", "parameters": {}}
 
+    # Release excess storage
     storage_ratio = storage_level / max(storage_capacity, 1.0)
-    if storage_ratio > 0.85:  
-        release_amount = (storage_level - 0.7 * storage_capacity) * 0.5
+    if storage_ratio > 0.85:
+        release_amount = max(0.0, (storage_level - 0.7 * storage_capacity) * 0.5)
         if release_amount > 0:
             return {"type": "release", "parameters": {"amount": release_amount}}
 
@@ -107,12 +72,24 @@ def choose_action(state, demand):
 
 
 def evaluate_episode(history):
+    """
+    Evaluates episode using rewards already normalized to [0, 1] by env.step().
+    Returns final_score in [0.0, 1.0].
+    """
+    if not history:
+        return {
+            "total_reward": 0.0,
+            "avg_reward": 0.0,
+            "final_score": 0.0,
+            "steps": 0,
+        }
+
     total_reward = sum(h.get("reward", 0.0) for h in history)
     episode_count = len(history)
-
     avg_reward = total_reward / max(episode_count, 1)
 
-    final_score = min(1.0, max(0.0, (avg_reward + 10.0) / 20.0))
+    # Rewards are already normalized [0, 1], so average is final score
+    final_score = np.clip(avg_reward, 0.0, 1.0)
 
     return {
         "total_reward": total_reward,
@@ -123,6 +100,10 @@ def evaluate_episode(history):
 
 
 def run_task(task_name, max_steps=10, seed=42):
+    """
+    Executes a single task (stable, volatile, or war).
+    Uses env.step() which provides normalized [0, 1] rewards.
+    """
     task_config = get_task_config(task_name)
 
     config = {
@@ -141,10 +122,6 @@ def run_task(task_name, max_steps=10, seed=42):
     env = LNGEnv(config)
     state = env.reset(seed=seed)
 
-    demand_forecast = generate_demand(seed=seed, max_steps=max_steps)
-
-    reward_engine = RewardEngine(config["reward"])
-
     history = []
 
     print(f"\n{'=' * 60}")
@@ -158,33 +135,27 @@ def run_task(task_name, max_steps=10, seed=42):
     print(f"  Budget: ${state.get('budget', 500.0):.2f}")
     print()
 
-    t = 0
-    while t < max_steps:
-        if t < len(demand_forecast):
-            demand = demand_forecast[t]
-        else:
-            demand = 0.0
+    for t in range(max_steps):
+        demand = state.get("demand", 0.0)
 
         action = choose_action(state, demand)
 
         state, env_reward, env_done, env_info = env.step(action)
 
-        reward, components = compute_reward(state, demand, reward_engine)
+        # env_reward is already normalized [0, 1] by RewardNormalizer in env.step()
+        history.append({"state": state, "action": action, "reward": env_reward})
 
-        done = t >= max_steps - 1
-
-        history.append({"state": state, "action": action, "reward": reward})
-
-        if (t + 1) % 5 == 0 or done:
+        if (t + 1) % 5 == 0 or t == max_steps - 1:
             storage_level = state.get("storage", {}).get("level", 0.0)
             print(f"Step {t + 1}:")
             print(f"  Action: {action['type']}")
             print(f"  Storage: {storage_level:.1f}")
             print(f"  Demand: {demand:.1f}")
-            print(f"  Reward: {reward:.4f}")
+            print(f"  Reward: {env_reward:.4f}")
             print()
 
-        t += 1
+        if env_done:
+            break
 
     evaluation = evaluate_episode(history)
 
@@ -207,6 +178,10 @@ def run_task(task_name, max_steps=10, seed=42):
 
 
 def run_all_tasks(max_steps=10, seed=42):
+    """
+    Executes all three tasks and aggregates results.
+    Final scores and rewards are guaranteed in [0, 1].
+    """
     tasks = ["stable", "volatile", "war"]
     results = []
 
@@ -235,8 +210,8 @@ def run_all_tasks(max_steps=10, seed=42):
             f"Reward: {result['total_reward']:.4f}"
         )
 
-    print(f"\nAverage Score: {avg_score:.4f}")
-    print(f"Average Reward: {avg_reward:.4f}")
+    print(f"\nAverage Score: {np.clip(avg_score, 0.0, 1.0):.4f}")
+    print(f"Average Reward: {np.clip(avg_reward, 0.0, 1.0):.4f}")
     print("=" * 60 + "\n")
 
     return results

@@ -11,10 +11,10 @@ COPY . .
 RUN pip install --no-cache-dir uv
 
 # Install dependencies using uv
-RUN uv pip install --system .
+RUN uv sync --frozen --no-install-project
 
 # Set environment variable (important for imports)
 ENV PYTHONPATH=/app
 
 # Default command
-CMD ["python", "inference.py"]
+CMD ["uv", "run", "python", "inference.py"]
