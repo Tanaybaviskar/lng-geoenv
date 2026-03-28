@@ -1,3 +1,6 @@
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
 [project]
 name = "lng-geoenv"
 version = "0.1.0"

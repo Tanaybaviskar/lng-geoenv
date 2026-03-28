@@ -1,13 +1,14 @@
 import random
 from .world import update_ships, handle_arrivals
-from src.lng_geoenv.demand import DemandGenerator
-from src.lng_geoenv.reward import RewardEngine
-from src.lng_geoenv.grader import RewardNormalizer
+from .demand import DemandGenerator
+from .reward import RewardEngine
+from .grader import RewardNormalizer
 
 class LNGEnv:
-    def __init__(self):
+    def __init__(self, config):
         self.state = None
-        self.max_steps = 10
+        self.max_steps = config["max_steps"]
+
         self.demand_gen = DemandGenerator()
         self.reward_engine = RewardEngine(config["reward"])
         self.normalizer = RewardNormalizer()
@@ -85,9 +86,7 @@ class LNGEnv:
                     ship["eta"] += 2  # delay
 
         elif action["type"] == "hedge":
-            self.state["budget"] -= 10
-
-        # wait then do nothing
+            self.state["budget"] = max(0, self.state["budget"] - 10)
 
     
     # how the env changes if i take this step
@@ -116,7 +115,7 @@ class LNGEnv:
         deficit = max(0, demand - supply)
 
         # 6. basic cost model
-        fuel_cost = sum([ship["eta"] for ship in self.state["ships"]])
+        fuel_cost = sum([max(0, ship["eta"]) for ship in self.state["ships"]])
         storage_cost = 0.02 * self.state["storage"]["level"]
         hedge_cost = 0 if action["type"] != "hedge" else 10
 
