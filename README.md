@@ -230,9 +230,9 @@ $$\text{penalty} = w_c \cdot C + w_s \cdot S + w_d \cdot D + w_r \cdot R$$
 
 **Components:**
 - $C$ = Transport cost (fuel per nautical mile) + Storage holding cost (0.02 per unit)
-- $S$ = Shortage penalty (quadratic: $\alpha \cdot \text{deficit}^2$, strongly penalizes unmet demand)
-- $D$ = Delay penalty ($\beta \cdot \sum_i \text{ETA}_i$, discourages slow routes)
-- $R$ = Risk penalty ($\gamma \cdot \text{risk} \cdot \text{cargo\_value}$, penalizes carrying high-value cargo on risky routes)
+- $S$ = Shortage penalty (quadratic: $\alpha \cdot d^2$ where $d$ is deficit, strongly penalizes unmet demand)
+- $D$ = Delay penalty ($\beta \cdot \sum_{i} \text{ETA}_{i}$, discourages slow routes)
+- $R$ = Risk penalty ($\gamma \cdot r \cdot v$ where $r$ is risk and $v$ is cargo value, penalizes carrying high-value cargo on risky routes)
 
 **Normalized reward:**
 $$r_t = \text{normalize}(-\text{penalty}_t) \in [0, 1]$$
