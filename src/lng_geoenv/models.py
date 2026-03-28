@@ -1,5 +1,18 @@
 from typing import List, TypedDict
+import numpy as np
 
+
+class RandomPolicy:
+    """
+    Baseline random agent for testing.
+    """
+
+    def act(self, state):
+        return np.array([
+            np.random.randint(0, 2),
+            np.random.uniform(-20, 20),
+            np.random.uniform(0, 30)
+        ])
 
 class Ship(TypedDict):
     id: int

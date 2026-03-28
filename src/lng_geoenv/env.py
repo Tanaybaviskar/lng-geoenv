@@ -166,6 +166,5 @@ class LNGEnv:
 
         return self.state, reward, done, info
     
-    # literally what it says
     def get_state(self):
         return self.state
