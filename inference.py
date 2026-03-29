@@ -113,11 +113,35 @@ def evaluate_episode(history):
     episode_count = len(history)
     avg_reward = total_reward / max(episode_count, 1)
 
-    # Rewards are already normalized [0, 1], so average is final score
     final_score = np.clip(avg_reward, 0.0, 1.0)
-    cost_score = 1 / (1 + total_cost)
-    shortage_score = 1 / (1 + total_shortage)
-    risk_score = 1 / (1 + total_risk)
+    total_penalty = total_cost + total_shortage + total_risk + 1e-8  # avoid div by zero
+
+    cost_score = total_cost / total_penalty
+    shortage_score = total_shortage / total_penalty
+    risk_score = total_risk / total_penalty
+    
+    total_decision_score = sum(h.get("decision_score", 0.0) for h in history)
+    # Normalize to [0,1]
+    decision_quality = 1 / (1 + np.exp(-total_decision_score / max(1, len(history))))
+    
+    # --- Generate Explanation ---
+    explanation_parts = []
+
+    if shortage_score > 0.5:
+        explanation_parts.append("High shortages impacted performance.")
+
+    if cost_score > 0.4:
+        explanation_parts.append("Operational costs were significant.")
+
+    if risk_score > 0.3:
+        explanation_parts.append("Risk exposure contributed notably.")
+
+    if decision_quality > 0.7:
+        explanation_parts.append("Agent demonstrated strong decision-making.")
+    elif decision_quality < 0.4:
+        explanation_parts.append("Agent decisions were often suboptimal.")
+
+    explanation = " ".join(explanation_parts) if explanation_parts else "Balanced performance across factors."
     
     return {
         "total_reward": total_reward,
@@ -127,8 +151,10 @@ def evaluate_episode(history):
         "breakdown": {
             "cost": cost_score,
             "shortage": shortage_score,
-            "risk": risk_score
-        }
+            "risk": risk_score,
+            "decision_quality": float(decision_quality)
+        },
+        "explanation": explanation
     }
 
 
@@ -176,12 +202,35 @@ def run_task(task_name, max_steps=10, seed=42):
 
         state, env_reward, env_done, env_info = env.step(action)
 
-        # env_reward is normalized [0, 1] by RewardNormalizer in env.step()
+        # --- Decision Quality Evaluation ---
+        decision_score = 0.0
+
+        storage_level = state.get("storage", {}).get("level", 0.0)
+        blocked_routes = state.get("blocked_routes", [])
+        action_type = action.get("type")
+
+        # Good: rerouting blocked ships
+        if action_type == "reroute":
+            decision_score += 1.0
+
+        # Good: releasing when low storage
+        if action_type == "release" and storage_level < demand:
+            decision_score += 1.0
+
+        # Good: hedging when price high
+        if action_type == "hedge" and state.get("price", 0) > 120:
+            decision_score += 0.5
+
+        # Bad: waiting during shortage
+        if action_type == "wait" and storage_level < demand:
+            decision_score -= 1.0
+
         history.append({
             "state": state,
             "action": action,
             "reward": env_reward,
-            "metrics": env_info.get("metrics", {})
+            "metrics": env_info.get("metrics", {}),
+            "decision_score": decision_score
         })
 
         if DEBUG and ((t + 1) % 5 == 0 or t == max_steps - 1):
@@ -212,6 +261,7 @@ def run_task(task_name, max_steps=10, seed=42):
         "task": task_name,
         "score": evaluation["final_score"],
         "breakdown": evaluation["breakdown"],
+        "explanation": evaluation["explanation"],
         "total_reward": evaluation["total_reward"],
         "avg_reward": evaluation["avg_reward"],
         "steps": evaluation["steps"],
