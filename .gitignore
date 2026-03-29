@@ -223,3 +223,21 @@ wheels/
 
 plan
 plan/
+# Environment configuration (local overrides)
+.env.local
+.env.*.local
+
+# Logs and debug files
+logs/
+*.log
+debug_*.txt
+
+# Agent cache (if any)
+.agent_cache/
+agent_memory/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
