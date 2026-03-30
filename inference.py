@@ -10,14 +10,20 @@ def run_all_tasks():
         result = run_task(task, seed=42)  # ensure reproducibility
         results.append(result)
 
-    avg_score = sum(r["score"] for r in results) / len(results)
+from src.lng_geoenv.env import LNGEnv
+from src.lng_geoenv.agent import choose_action
+from src.lng_geoenv.reward import RewardEngine
 
-    return {
-        "environment": "lng-geoenv",
-        "tasks": results,
-        "average_score": avg_score,
-        "execution_status": "success"
-    }
+# Example config for RewardEngine (adjust as needed)
+reward_config = {
+    "w_cost": 1.0,
+    "w_shortage": 10.0,
+    "w_delay": 1.0,
+    "w_risk": 1.0,
+    "alpha": 2.0,
+    "beta": 1.0,
+    "gamma": 1.0
+}
 
 
 if __name__ == "__main__":
