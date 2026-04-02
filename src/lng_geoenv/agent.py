@@ -19,7 +19,7 @@ class LNGAgent:
             res = requests.post(
                 "http://localhost:11434/api/generate",
                 json={
-                    "model": "mixtral",  # change to llama3 etc.
+                    "model": "phi4-mini",  
                     "prompt": prompt,
                     "stream": False
                 }

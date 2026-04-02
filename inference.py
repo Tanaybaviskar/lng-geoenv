@@ -97,11 +97,10 @@ else:
 
 
     def main():
-        # 🔥 LOCAL MODE (NO API KEY NEEDED)
         agent = LNGAgent(
-            model_name="local",   # not used for local
+            model_name="local",
             api_key=None,
-            use_local=True        # 🔥 IMPORTANT
+            use_local=True
         )
 
         for task in TASKS:
