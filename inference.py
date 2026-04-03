@@ -56,7 +56,7 @@ def main():
 
         env = LNGEnv(
             config=config,
-            task_config=get_task_config(task)
+            task_config=get_task_config(task))
     import os
     import time
 
@@ -137,8 +137,8 @@ def main():
         print("\n✅ Run complete.")
 
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
 else:
     from src.lng_geoenv.env import LNGEnv
     from src.lng_geoenv.tasks import get_task_config

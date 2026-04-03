@@ -1,3 +1,4 @@
+from lng_geoenv.safety import safety_override
 
 class LNGAgent:
     def __init__(self, client, model_name):
@@ -183,7 +184,7 @@ class LNGAgent:
             action = self.baseline(state)
 
         action = self.safe(state, action)
-
+        action = safety_override(state, action)
         # ✅ store in cache
         self.cache[key] = action
 
