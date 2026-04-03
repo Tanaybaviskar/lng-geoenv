@@ -1,6 +1,6 @@
 from .env import LNGEnv
 from .tasks import get_task_config
-from .agent import choose_action
+from .agent import LNGAgent
 from .models import Action
 from .evaluator import evaluate_episode
 
@@ -34,6 +34,7 @@ def run_task(task_name, max_steps=10, seed=42):
 
     env = LNGEnv(config=config, task_config=task_config)
     state = env.reset(seed=seed)
+    agent = LNGAgent()
 
     history = []
 
@@ -51,9 +52,9 @@ def run_task(task_name, max_steps=10, seed=42):
     for t in range(max_steps):
         time_step = state.time_step
         demand_forecast = state.demand_forecast
-        demand = demand_forecast[min(time_step, len(demand_forecast) - 1)]
+        # demand = demand_forecast[min(time_step, len(demand_forecast) - 1)]
 
-        raw_action = choose_action(state.model_dump(), demand)
+        raw_action = agent.get_llm_action(state.model_dump())
         action = Action(
             **{
                 "action_type": raw_action.get("type"),

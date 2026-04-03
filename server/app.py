@@ -1,3 +1,9 @@
+
+# Ensure src is importable when running directly
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 """Flask-based server for LNG-GeoEnv inference API"""
 
 import json
@@ -13,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+
+
+@app.route("/reset", methods=["POST"])
+def reset():
+    return {"status": "ok"}, 200
 
 
 @app.route("/health", methods=["GET"])
