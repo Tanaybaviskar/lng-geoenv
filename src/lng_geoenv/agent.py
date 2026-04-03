@@ -1,5 +1,5 @@
-
-from google import genai
+import os
+import google.generativeai as genai
 import requests
 
 
@@ -8,8 +8,8 @@ class LNGAgent:
         self.model_name = model_name
         self.use_local = use_local
 
-        if not use_local:
-            self.client = genai.Client(api_key=api_key)
+        if not use_local and api_key:
+            genai.configure(api_key=api_key)
 
     # -----------------------------
     # 🔥 LOCAL LLM (OLLAMA)
@@ -18,11 +18,7 @@ class LNGAgent:
         try:
             res = requests.post(
                 "http://localhost:11434/api/generate",
-                json={
-                    "model": "phi4-mini",  
-                    "prompt": prompt,
-                    "stream": False
-                }
+                json={"model": "phi4-mini", "prompt": prompt, "stream": False},
             )
             return res.json()["response"].strip().lower()
         except:
@@ -33,10 +29,8 @@ class LNGAgent:
     # -----------------------------
     def call_gemini(self, prompt: str) -> str:
         try:
-            res = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt
-            )
+            model = genai.GenerativeModel(self.model_name)
+            res = model.generate_content(prompt)
             return res.text.strip().lower()
         except:
             return "wait"
@@ -91,7 +85,10 @@ ONLY output action.
         if "hedge" in text:
             return {"type": "hedge", "parameters": {}}
         if "reroute" in text:
-            return {"type": "reroute", "parameters": {"ship_id": 1, "new_route": "Atlantic"}}
+            return {
+                "type": "reroute",
+                "parameters": {"ship_id": 1, "new_route": "Atlantic"},
+            }
         if "50" in text:
             return {"type": "release", "parameters": {"amount": 50}}
         if "20" in text:
@@ -126,10 +123,7 @@ ONLY output action.
             if ship["route"] in blocked:
                 return {
                     "type": "reroute",
-                    "parameters": {
-                        "ship_id": ship["id"],
-                        "new_route": "Atlantic"
-                    }
+                    "parameters": {"ship_id": ship["id"], "new_route": "Atlantic"},
                 }
 
         if storage > 0.85 * capacity and deficit <= 0:
@@ -172,3 +166,83 @@ ONLY output action.
     def act(self, state: dict) -> dict:
         llm_action = self.get_llm_action(state)
         return self.safe(state, llm_action)
+
+
+class GeminiAgent:
+    def __init__(self, use_llm=True):
+        self.use_llm = use_llm
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        if use_llm and self.api_key:
+            genai.configure(api_key=self.api_key)
+
+    def choose_action(self, state: dict) -> dict:
+        if not self.use_llm:
+            return choose_action(state, state.get("demand_forecast", [0])[0])
+
+        try:
+            t = state.get("time_step", 0)
+            demand = state.get("demand_forecast", [0])[
+                min(t, len(state.get("demand_forecast", [0])) - 1)
+            ]
+            storage = state.get("storage", {}).get("level", 0)
+            capacity = state.get("storage", {}).get("capacity", 100)
+            budget = state.get("budget", 0)
+            ships = state.get("ships", [])
+            blocked = state.get("blocked_routes", [])
+
+            incoming = sum(
+                s.get("capacity", 0) for s in ships if s.get("eta", 999) <= 1
+            )
+
+            prompt = f"""You are managing LNG supply. Choose ONE action:
+Demand: {demand}, Storage: {storage}/{capacity}, Budget: ${budget}
+Actions: wait, store, hedge, release, reroute
+Reply with just the action name."""
+
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(prompt)
+            text = response.text.strip().lower()
+
+            if "store" in text:
+                return {"type": "store", "parameters": {"amount": 20.0}}
+            if "hedge" in text:
+                return {"type": "hedge", "parameters": {}}
+            if "reroute" in text:
+                return {
+                    "type": "reroute",
+                    "parameters": {"ship_id": 1, "new_route": "Atlantic"},
+                }
+            if "release" in text:
+                return {"type": "release", "parameters": {"amount": 20.0}}
+            return {"type": "wait", "parameters": {}}
+        except:
+            return choose_action(state, state.get("demand_forecast", [0])[0])
+
+
+def choose_action(state: dict, demand: float) -> dict:
+    storage = state.get("storage", {}).get("level", 0)
+    capacity = state.get("storage", {}).get("capacity", 100)
+    budget = state.get("budget", 0)
+    ships = state.get("ships", [])
+    blocked = state.get("blocked_routes", [])
+
+    incoming = sum(s.get("capacity", 0) for s in ships if s.get("eta", 999) <= 1)
+    supply = storage + incoming
+    deficit = demand - supply
+
+    if deficit > 0:
+        if budget >= 20:
+            return {"type": "store", "parameters": {"amount": 20.0}}
+        return {"type": "hedge", "parameters": {}}
+
+    for ship in ships:
+        if ship.get("route") in blocked:
+            return {
+                "type": "reroute",
+                "parameters": {"ship_id": ship.get("id", 1), "new_route": "Atlantic"},
+            }
+
+    if storage > 0.85 * capacity and deficit <= 0:
+        return {"type": "release", "parameters": {"amount": 20.0}}
+
+    return {"type": "wait", "parameters": {}}
