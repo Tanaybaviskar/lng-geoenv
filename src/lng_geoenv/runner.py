@@ -1,6 +1,6 @@
 from .env import LNGEnv
 from .tasks import get_task_config
-from .agent import choose_action, GeminiAgent
+from .agent import LNGAgent
 from .models import Action
 from .evaluator import evaluate_episode
 
@@ -35,6 +35,7 @@ def run_task(task_name, max_steps=10, seed=42, use_llm=False):
 
     env = LNGEnv(config=config, task_config=task_config)
     state = env.reset(seed=seed)
+    agent = LNGAgent()
 
     history = []
     agent = GeminiAgent(use_llm=True) if use_llm else None
@@ -53,12 +54,9 @@ def run_task(task_name, max_steps=10, seed=42, use_llm=False):
     for t in range(max_steps):
         time_step = state.time_step
         demand_forecast = state.demand_forecast
-        demand = demand_forecast[min(time_step, len(demand_forecast) - 1)]
+        # demand = demand_forecast[min(time_step, len(demand_forecast) - 1)]
 
-        if use_llm:
-            raw_action = agent.choose_action(state.model_dump())
-        else:
-            raw_action = choose_action(state.model_dump(), demand)
+        raw_action = agent.get_llm_action(state.model_dump())
         action = Action(
             **{
                 "action_type": raw_action.get("type"),

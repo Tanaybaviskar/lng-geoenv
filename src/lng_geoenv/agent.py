@@ -1,105 +1,48 @@
-import os
-import google.generativeai as genai
-import requests
-
+from lng_geoenv.safety import safety_override
 
 class LNGAgent:
-    def __init__(self, model_name: str, api_key: str, use_local=False):
+    def __init__(self, client, model_name):
+        self.client = client
         self.model_name = model_name
-        self.use_local = use_local
-
-        if not use_local and api_key:
-            genai.configure(api_key=api_key)
+        self.cache = {}  # 🔥 state-action cache
 
     # -----------------------------
-    # 🔥 LOCAL LLM (OLLAMA)
+    # 🔥 STATE SIGNATURE (for caching)
     # -----------------------------
-    def call_local_llm(self, prompt: str) -> str:
-        try:
-            res = requests.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "phi4-mini", "prompt": prompt, "stream": False},
-            )
-            return res.json()["response"].strip().lower()
-        except:
-            return "wait"
+    def _state_key(self, state):
+        t = state["time_step"]
+        demand = int(state["demand_forecast"][t] // 10)
+        storage = int(state["storage"]["level"] // 10)
+        return (t, demand, storage)
 
     # -----------------------------
-    # 🔥 GEMINI LLM
+    # 🔥 LLM TRIGGER (VERY IMPORTANT)
     # -----------------------------
-    def call_gemini(self, prompt: str) -> str:
-        try:
-            model = genai.GenerativeModel(self.model_name)
-            res = model.generate_content(prompt)
-            return res.text.strip().lower()
-        except:
-            return "wait"
-
-    # -----------------------------
-    # LLM ACTION
-    # -----------------------------
-    def get_llm_action(self, state: dict) -> dict:
+    def should_call_llm(self, state):
         t = state["time_step"]
         demand = state["demand_forecast"][t]
         storage = state["storage"]["level"]
-        capacity = state["storage"]["capacity"]
-        budget = state["budget"]
 
         ships = state.get("ships", [])
         blocked = state.get("blocked_routes", [])
 
         incoming = sum(s["capacity"] for s in ships if s.get("eta", 999) <= 1)
+        supply = storage + incoming
+        deficit = demand - supply
 
-        prompt = f"""
-You are managing LNG supply optimally.
+        if deficit > 20:
+            return True
+        if len(blocked) > 0:
+            return True
+        if t % 5 == 0:
+            return True
 
-GOAL:
-1. Avoid shortage (MOST IMPORTANT)
-2. Minimize cost
-
-STATE:
-Demand: {demand}
-Storage: {storage}/{capacity}
-Incoming: {incoming}
-Budget: {budget}
-Blocked Routes: {blocked}
-
-RULES:
-- release reduces storage
-- store/hedge increases supply
-- DO NOT cause shortage
-
-Choose ONE:
-wait / store / hedge / release_20 / release_50 / reroute
-
-ONLY output action.
-"""
-
-        if self.use_local:
-            text = self.call_local_llm(prompt)
-        else:
-            text = self.call_gemini(prompt)
-
-        if "store" in text:
-            return {"type": "store", "parameters": {"amount": 20}}
-        if "hedge" in text:
-            return {"type": "hedge", "parameters": {}}
-        if "reroute" in text:
-            return {
-                "type": "reroute",
-                "parameters": {"ship_id": 1, "new_route": "Atlantic"},
-            }
-        if "50" in text:
-            return {"type": "release", "parameters": {"amount": 50}}
-        if "20" in text:
-            return {"type": "release", "parameters": {"amount": 20}}
-
-        return {"type": "wait", "parameters": {}}
+        return False
 
     # -----------------------------
-    # BASELINE
+    # 🔥 BASELINE (fast fallback)
     # -----------------------------
-    def baseline(self, state: dict) -> dict:
+    def baseline(self, state):
         t = state["time_step"]
         demand = state["demand_forecast"][t]
         storage = state["storage"]["level"]
@@ -126,15 +69,78 @@ ONLY output action.
                     "parameters": {"ship_id": ship["id"], "new_route": "Atlantic"},
                 }
 
-        if storage > 0.85 * capacity and deficit <= 0:
+        if storage > 0.85 * capacity:
             return {"type": "release", "parameters": {"amount": 20}}
 
         return {"type": "wait", "parameters": {}}
 
     # -----------------------------
-    # SAFETY
+    # 🔥 LLM CALL (OpenAI format)
     # -----------------------------
-    def safe(self, state: dict, action: dict) -> dict:
+    def call_llm(self, prompt):
+        try:
+            #print("🔥 LLM CALL START")
+
+            response = self.client.responses.create(
+                model=self.model_name,
+                input=prompt,
+                max_output_tokens=10,
+                temperature=0.0,
+            )
+
+            # 🔥 SAFE EXTRACTION
+            text = ""
+
+            if hasattr(response, "output") and response.output:
+                for item in response.output:
+                    if hasattr(item, "content"):
+                        for c in item.content:
+                            if hasattr(c, "text") and c.text:
+                                text += c.text
+
+            text = text.strip().lower()
+
+            if not text:
+                print("⚠️ EMPTY RESPONSE → fallback to wait")
+                return "wait"
+
+            # print("✅ LLM RAW:", text)
+
+            return text
+
+        except Exception as e:
+            print("❌ LLM ERROR:", e)
+            return "wait"
+
+
+
+    # -----------------------------
+    # 🔥 PARSE
+    # -----------------------------
+    VALID_ACTIONS = {
+        "wait": {"type": "wait", "parameters": {}},
+        "store": {"type": "store", "parameters": {"amount": 20}},
+        "hedge": {"type": "hedge", "parameters": {}},
+        "release_20": {"type": "release", "parameters": {"amount": 20}},
+        "release_50": {"type": "release", "parameters": {"amount": 50}},
+        "reroute": {"type": "reroute", "parameters": {"ship_id": 1, "new_route": "Atlantic"}},
+    }
+
+    def parse(self, text):
+        text = (text or "").strip().lower()
+
+        for key in self.VALID_ACTIONS:
+            if key in text:
+                return self.VALID_ACTIONS[key]
+
+        # 🔥 fallback to baseline instead of wait
+        return None
+
+
+    # -----------------------------
+    # 🔥 SAFETY FILTER
+    # -----------------------------
+    def safe(self, state, action):
         t = state["time_step"]
         demand = state["demand_forecast"][t]
         storage = state["storage"]["level"]
@@ -155,94 +161,62 @@ ONLY output action.
         if action["type"] == "release" and storage < 0.3 * capacity:
             return self.baseline(state)
 
-        if action["type"] == "reroute" and len(state.get("blocked_routes", [])) == 0:
-            return self.baseline(state)
+        return action
+
+    # -----------------------------
+    # 🔥 FINAL DECISION
+    # -----------------------------
+    def act(self, state):
+        key = self._state_key(state)
+
+        # ✅ cache hit
+        if key in self.cache:
+            return self.cache[key]
+
+        # ✅ decide whether to call LLM
+        if self.should_call_llm(state):
+            text = self.call_llm(self._build_prompt(state))
+            action = self.parse(text)
+
+            if action is None:
+                action = self.baseline(state)
+        else:
+            action = self.baseline(state)
+
+        action = self.safe(state, action)
+        action = safety_override(state, action)
+        # ✅ store in cache
+        self.cache[key] = action
 
         return action
 
     # -----------------------------
-    # FINAL
+    # PROMPT
     # -----------------------------
-    def act(self, state: dict) -> dict:
-        llm_action = self.get_llm_action(state)
-        return self.safe(state, llm_action)
+    def _build_prompt(self, state):
+        t = state["time_step"]
 
+        return f"""
+    You must choose ONE action.
 
-class GeminiAgent:
-    def __init__(self, use_llm=True):
-        self.use_llm = use_llm
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        if use_llm and self.api_key:
-            genai.configure(api_key=self.api_key)
+    Allowed actions:
+    wait
+    store
+    hedge
+    release_20
+    release_50
+    reroute
 
-    def choose_action(self, state: dict) -> dict:
-        if not self.use_llm:
-            return choose_action(state, state.get("demand_forecast", [0])[0])
+    Rules:
+    - Output ONLY one word from the list
+    - Do NOT explain
+    - Do NOT write sentences
+    - If you output anything else, it is WRONG
 
-        try:
-            t = state.get("time_step", 0)
-            demand = state.get("demand_forecast", [0])[
-                min(t, len(state.get("demand_forecast", [0])) - 1)
-            ]
-            storage = state.get("storage", {}).get("level", 0)
-            capacity = state.get("storage", {}).get("capacity", 100)
-            budget = state.get("budget", 0)
-            ships = state.get("ships", [])
-            blocked = state.get("blocked_routes", [])
+    State:
+    Demand: {state['demand_forecast'][t]}
+    Storage: {state['storage']['level']}
+    Blocked routes: {state.get('blocked_routes', [])}
 
-            incoming = sum(
-                s.get("capacity", 0) for s in ships if s.get("eta", 999) <= 1
-            )
-
-            prompt = f"""You are managing LNG supply. Choose ONE action:
-Demand: {demand}, Storage: {storage}/{capacity}, Budget: ${budget}
-Actions: wait, store, hedge, release, reroute
-Reply with just the action name."""
-
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            response = model.generate_content(prompt)
-            text = response.text.strip().lower()
-
-            if "store" in text:
-                return {"type": "store", "parameters": {"amount": 20.0}}
-            if "hedge" in text:
-                return {"type": "hedge", "parameters": {}}
-            if "reroute" in text:
-                return {
-                    "type": "reroute",
-                    "parameters": {"ship_id": 1, "new_route": "Atlantic"},
-                }
-            if "release" in text:
-                return {"type": "release", "parameters": {"amount": 20.0}}
-            return {"type": "wait", "parameters": {}}
-        except:
-            return choose_action(state, state.get("demand_forecast", [0])[0])
-
-
-def choose_action(state: dict, demand: float) -> dict:
-    storage = state.get("storage", {}).get("level", 0)
-    capacity = state.get("storage", {}).get("capacity", 100)
-    budget = state.get("budget", 0)
-    ships = state.get("ships", [])
-    blocked = state.get("blocked_routes", [])
-
-    incoming = sum(s.get("capacity", 0) for s in ships if s.get("eta", 999) <= 1)
-    supply = storage + incoming
-    deficit = demand - supply
-
-    if deficit > 0:
-        if budget >= 20:
-            return {"type": "store", "parameters": {"amount": 20.0}}
-        return {"type": "hedge", "parameters": {}}
-
-    for ship in ships:
-        if ship.get("route") in blocked:
-            return {
-                "type": "reroute",
-                "parameters": {"ship_id": ship.get("id", 1), "new_route": "Atlantic"},
-            }
-
-    if storage > 0.85 * capacity and deficit <= 0:
-        return {"type": "release", "parameters": {"amount": 20.0}}
-
-    return {"type": "wait", "parameters": {}}
+    Answer:
+    """

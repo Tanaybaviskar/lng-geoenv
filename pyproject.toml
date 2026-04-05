@@ -17,6 +17,7 @@ dependencies = [
     "openenv>=0.1.13",
     "flask>=3.0.0",
     "google-genai>=1.69.0",
+    "openenv-core>=0.2.3",
 ]
 
 [project.scripts]
