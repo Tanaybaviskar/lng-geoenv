@@ -1,3 +1,5 @@
+from lng_geoenv.safety import safety_override
+
 class LNGAgent:
     def __init__(self, client, model_name):
         self.client = client
@@ -12,8 +14,7 @@ class LNGAgent:
 
     def should_call_llm(self, state):
         if self.client is None:
-            return False
-
+              return False
         t = state["time_step"]
         demand = state["demand_forecast"][t]
         storage = state["storage"]["level"]
@@ -152,6 +153,7 @@ class LNGAgent:
             action = self.baseline(state)
 
         action = self.safe(state, action)
+        action = safety_override(state, action)
         self.cache[key] = action
 
         return action
