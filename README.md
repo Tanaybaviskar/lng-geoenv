@@ -460,9 +460,13 @@ lng-geoenv/
 │   └── tasks.py                     # Task configurations
 ├── server/
 │   └── app.py                       # Flask API server
-├── tests/
+├── tests/                           # Test Suite
 │   ├── test_env.py
 │   ├── test_reward.py
+│   ├── test_env_integration.py
+│   ├── test_env.py
+│   ├── test_models.py
+│   ├── test_world_tasks_evaluator.py
 │   └── test_demand.py
 ├── inference.py                     # Baseline entry point
 ├── openenv.yaml                     # OpenEnv spec

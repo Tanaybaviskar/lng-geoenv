@@ -98,7 +98,9 @@ class LNGEnv:
             cost = 10
             if self.state.budget >= cost:
                 self.state.budget -= cost
-                self.state.storage.level += 20  # hedge adds supply
+                self.state.storage.level = min(
+                    self.state.storage.capacity, self.state.storage.level + 20
+                )  # hedge adds supply
 
     def step(self, action):
         # Convert dict action to Action model if needed (backward compatibility)
