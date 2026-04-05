@@ -108,8 +108,9 @@ def create_app():
 
 def main():
     """Entry point for server"""
-    logger.info("Starting LNG-GeoEnv server on 0.0.0.0:8000")
-    app.run(host="0.0.0.0", port=8000, debug=False)
+    port = int(os.getenv("PORT", "8000"))
+    logger.info(f"Starting LNG-GeoEnv server on 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
 
 
 if __name__ == "__main__":

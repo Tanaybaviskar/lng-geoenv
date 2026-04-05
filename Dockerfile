@@ -16,5 +16,6 @@ RUN uv sync --frozen --no-install-project
 # Set environment variable (important for imports)
 ENV PYTHONPATH=/app
 
-# Default command
-CMD ["uv", "run", "python", "inference.py"]
+# Default command (long-lived server for HF Spaces)
+# Note: we use --no-install-project above, so project console_scripts aren't installed.
+CMD ["uv", "run", "python", "server/app.py"]

@@ -4,21 +4,17 @@ class LNGAgent:
     def __init__(self, client, model_name):
         self.client = client
         self.model_name = model_name
-        self.cache = {}  # 🔥 state-action cache
+        self.cache = {}
 
-    # -----------------------------
-    # 🔥 STATE SIGNATURE (for caching)
-    # -----------------------------
     def _state_key(self, state):
         t = state["time_step"]
         demand = int(state["demand_forecast"][t] // 10)
         storage = int(state["storage"]["level"] // 10)
         return (t, demand, storage)
 
-    # -----------------------------
-    # 🔥 LLM TRIGGER (VERY IMPORTANT)
-    # -----------------------------
     def should_call_llm(self, state):
+        if self.client is None:
+              return False
         t = state["time_step"]
         demand = state["demand_forecast"][t]
         storage = state["storage"]["level"]
@@ -30,18 +26,8 @@ class LNGAgent:
         supply = storage + incoming
         deficit = demand - supply
 
-        if deficit > 20:
-            return True
-        if len(blocked) > 0:
-            return True
-        if t % 5 == 0:
-            return True
+        return deficit > 20 or len(blocked) > 0 or t % 5 == 0
 
-        return False
-
-    # -----------------------------
-    # 🔥 BASELINE (fast fallback)
-    # -----------------------------
     def baseline(self, state):
         t = state["time_step"]
         demand = state["demand_forecast"][t]
@@ -53,7 +39,6 @@ class LNGAgent:
         blocked = state.get("blocked_routes", [])
 
         incoming = sum(s["capacity"] for s in ships if s.get("eta", 999) <= 1)
-
         supply = storage + incoming
         deficit = demand - supply
 
@@ -74,13 +59,11 @@ class LNGAgent:
 
         return {"type": "wait", "parameters": {}}
 
-    # -----------------------------
-    # 🔥 LLM CALL (OpenAI format)
-    # -----------------------------
     def call_llm(self, prompt):
-        try:
-            #print("🔥 LLM CALL START")
+        if self.client is None:
+            return None
 
+        try:
             response = self.client.responses.create(
                 model=self.model_name,
                 input=prompt,
@@ -88,7 +71,6 @@ class LNGAgent:
                 temperature=0.0,
             )
 
-            # 🔥 SAFE EXTRACTION
             text = ""
 
             if hasattr(response, "output") and response.output:
@@ -101,45 +83,37 @@ class LNGAgent:
             text = text.strip().lower()
 
             if not text:
-                print("⚠️ EMPTY RESPONSE → fallback to wait")
-                return "wait"
-
-            # print("✅ LLM RAW:", text)
+                return None
 
             return text
 
-        except Exception as e:
-            print("❌ LLM ERROR:", e)
-            return "wait"
+        except Exception:
+            return None
 
-
-
-    # -----------------------------
-    # 🔥 PARSE
-    # -----------------------------
     VALID_ACTIONS = {
         "wait": {"type": "wait", "parameters": {}},
         "store": {"type": "store", "parameters": {"amount": 20}},
         "hedge": {"type": "hedge", "parameters": {}},
         "release_20": {"type": "release", "parameters": {"amount": 20}},
         "release_50": {"type": "release", "parameters": {"amount": 50}},
-        "reroute": {"type": "reroute", "parameters": {"ship_id": 1, "new_route": "Atlantic"}},
+        "reroute": {
+            "type": "reroute",
+            "parameters": {"ship_id": 1, "new_route": "Atlantic"},
+        },
     }
 
     def parse(self, text):
-        text = (text or "").strip().lower()
+        if not text:
+            return None
+
+        text = text.strip().lower()
 
         for key in self.VALID_ACTIONS:
             if key in text:
                 return self.VALID_ACTIONS[key]
 
-        # 🔥 fallback to baseline instead of wait
         return None
 
-
-    # -----------------------------
-    # 🔥 SAFETY FILTER
-    # -----------------------------
     def safe(self, state, action):
         t = state["time_step"]
         demand = state["demand_forecast"][t]
@@ -163,17 +137,12 @@ class LNGAgent:
 
         return action
 
-    # -----------------------------
-    # 🔥 FINAL DECISION
-    # -----------------------------
     def act(self, state):
         key = self._state_key(state)
 
-        # ✅ cache hit
         if key in self.cache:
             return self.cache[key]
 
-        # ✅ decide whether to call LLM
         if self.should_call_llm(state):
             text = self.call_llm(self._build_prompt(state))
             action = self.parse(text)
@@ -185,38 +154,32 @@ class LNGAgent:
 
         action = self.safe(state, action)
         action = safety_override(state, action)
-        # ✅ store in cache
         self.cache[key] = action
 
         return action
 
-    # -----------------------------
-    # PROMPT
-    # -----------------------------
     def _build_prompt(self, state):
         t = state["time_step"]
 
         return f"""
-    You must choose ONE action.
+You must choose ONE action.
 
-    Allowed actions:
-    wait
-    store
-    hedge
-    release_20
-    release_50
-    reroute
+Allowed actions:
+wait
+store
+hedge
+release_20
+release_50
+reroute
 
-    Rules:
-    - Output ONLY one word from the list
-    - Do NOT explain
-    - Do NOT write sentences
-    - If you output anything else, it is WRONG
+Rules:
+- Output ONLY one word from the list
+- Do NOT explain
 
-    State:
-    Demand: {state['demand_forecast'][t]}
-    Storage: {state['storage']['level']}
-    Blocked routes: {state.get('blocked_routes', [])}
+State:
+Demand: {state['demand_forecast'][t]}
+Storage: {state['storage']['level']}
+Blocked routes: {state.get('blocked_routes', [])}
 
-    Answer:
-    """
+Answer:
+"""

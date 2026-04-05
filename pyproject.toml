@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.4.3",
     "pydantic>=2.12.5",
+    "openai>=1.0.0",
     "pytest>=9.0.2",
     "pyyaml>=6.0.3",
     "google-generativeai>=0.8.0",
