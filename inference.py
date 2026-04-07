@@ -1,14 +1,3 @@
-"""
-LNG-GeoEnv Inference Script
-
-Evaluates the LNG agent on three task configurations:
-- stable (easy)
-- volatile (medium)
-- war (hard)
-
-Runs with or without LLM credentials (graceful fallback to baseline).
-"""
-
 import os
 from dotenv import load_dotenv
 
@@ -18,14 +7,11 @@ from src.lng_geoenv.models import Action
 from src.lng_geoenv.agent import LNGAgent
 from src.lng_geoenv.evaluator import evaluate_episode
 
-# Load environment variables
 load_dotenv()
 
-# Constants
-MAX_STEPS = 10  # 10 steps per episode (as per documentation baseline)
+MAX_STEPS = 10
 TASKS = ["stable", "volatile", "war"]
 
-# Try to initialize OpenAI client (optional)
 client = None
 try:
     from openai import OpenAI
@@ -48,15 +34,12 @@ except Exception as e:
     print(f"⚠️  Could not initialize OpenAI client: {e}. Running with baseline policy.")
     client = None
 
-# Default model name if not set
 if client is None:
     MODEL_NAME = "baseline"
 
 
 def run_task(task_name):
     """Run inference on a single task configuration."""
-
-    # Environment config
     config = {
         "max_steps": MAX_STEPS,
         "reward": {
@@ -69,37 +52,23 @@ def run_task(task_name):
             "gamma": 2.0,
         },
     }
-
-    # Create environment and agent
     env = LNGEnv(config=config, task_config=get_task_config(task_name))
     agent = LNGAgent(client=client, model_name=MODEL_NAME)
-
-    # Reset environment
     state = env.reset(seed=42)
-
-    # Run episode
     history = []
     step = 0
     done = False
 
     while not done and step < MAX_STEPS:
         state_dict = state.model_dump()
-
-        # Get action from agent
         action_dict = agent.act(state_dict)
-
-        # Convert to Action model
         action = Action(
             action_type=action_dict["type"],
             amount=action_dict["parameters"].get("amount", 0.0),
             ship_id=action_dict["parameters"].get("ship_id"),
             new_route=action_dict["parameters"].get("new_route"),
         )
-
-        # Step environment
         state, reward, done, info = env.step(action)
-
-        # Record for evaluation
         history.append({"reward": reward.value, "metrics": info.get("metrics", {})})
 
         print(
@@ -108,7 +77,6 @@ def run_task(task_name):
 
         step += 1
 
-    # Evaluate episode
     result = evaluate_episode(history)
     return result
 
