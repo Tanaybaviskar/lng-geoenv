@@ -1,3 +1,14 @@
+---
+title: LNG-GeoEnv
+emoji: ⛽
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_file: server/app.py
+pinned: false
+python_version: "3.12"
+---
+
 # LNG-GeoEnv: Real-World LNG Supply Chain Crisis Management
 
 **Engineering decisions that keep the world running when supply chains break.**

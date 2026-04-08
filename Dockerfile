@@ -10,8 +10,8 @@ COPY . .
 # Install uv (fast dependency manager)
 RUN pip install --no-cache-dir uv
 
-# Install dependencies using uv
-RUN uv sync --frozen --no-install-project
+# Install dependencies AND project
+RUN uv sync --frozen
 
 # Set environment variables
 ENV PYTHONPATH=/app
