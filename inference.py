@@ -15,7 +15,7 @@ TASKS = ["stable", "volatile", "war"]
 
 client = None
 API_BASE_URL = os.getenv("API_BASE_URL", "")
-HF_TOKEN = os.getenv("HF_TOKEN", "")
+HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
 
 try:
@@ -179,54 +179,22 @@ def run_task(task_name):
 
 
 def main():
-    """Main entry point: run all tasks and report scores."""
-
-    print("\n" + "=" * 80)
-    print("🚀 LNG-GeoEnv Inference")
-    print("=" * 80)
+    print("START")
     print(f"Model: {MODEL_NAME}")
     print(f"Steps per episode: {MAX_STEPS}")
     print(f"Tasks: {', '.join(TASKS)}")
-    print(f"Seed: 42 (deterministic)")
-    print("=" * 80)
-
-    all_scores = []
 
     for task_name in TASKS:
-        print(f"\n📋 Task: {task_name.upper()}")
-        print("-" * 80)
-
         try:
             result = run_task(task_name)
             score = result["final_score"]
-            all_scores.append(score)
-
-            print(f"\n✅ Task complete")
-            print(f"   Score: {score:.3f}")
-            print(f"   Total reward: {result['total_reward']:.2f}")
-            print(f"   Steps: {result['steps']}")
-            print(f"   Breakdown: {result['breakdown']}")
-
+            print(f"STEP: {task_name}")
+            print(f"Score: {score:.3f}")
         except Exception as e:
-            print(f"❌ Task failed with error: {e}")
-            import traceback
+            print(f"STEP: {task_name}")
+            print(f"Score: 0.000")
 
-            traceback.print_exc()
-
-    # Summary
-    print("\n" + "=" * 80)
-    print("📊 Final Summary")
-    print("=" * 80)
-
-    for task_name, score in zip(TASKS, all_scores):
-        print(f"  {task_name:10s} : {score:.3f}")
-
-    if all_scores:
-        avg_score = sum(all_scores) / len(all_scores)
-        print(f"  {'Average':10s} : {avg_score:.3f}")
-
-    print("=" * 80)
-    print("✅ Inference complete\n")
+    print("END")
 
 
 if __name__ == "__main__":

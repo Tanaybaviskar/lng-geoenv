@@ -1,12 +1,14 @@
 ---
-title: LNG-GeoEnv
-emoji: ⛽
+title: LNG Geographic Environment Server
+emoji: 🚢
 colorFrom: blue
-colorTo: green
+colorTo: gray
 sdk: docker
-app_file: server/app.py
 pinned: false
-python_version: "3.12"
+app_port: 7860
+base_path: /web
+tags:
+  - openenv
 ---
 
 # LNG-GeoEnv: Real-World LNG Supply Chain Crisis Management
