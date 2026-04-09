@@ -1,11 +1,9 @@
 import os
-import json
 import sys
 from pathlib import Path
 from typing import Optional
 
-# Ensure imports work even if the validator runs `python /tmp/workspace/inference.py`
-# from a different working directory.
+# Ensure imports work even if validator runs from another dir
 _REPO_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -17,62 +15,13 @@ try:
     from src.lng_geoenv.models import Action
     from src.lng_geoenv.evaluator import evaluate_episode
 except ModuleNotFoundError as e:
-    # Hackathon validators often execute in a clean env; if dependencies
-    # aren't installed (e.g., numpy/pydantic), importing the env will fail.
     _CORE_IMPORT_ERROR = e
 
-
-def _safe_load_dotenv() -> None:
-    """Load .env if python-dotenv is available.
-
-    The hackathon validator may execute this file in an environment that does not
-    install optional dependencies. Missing dotenv should not crash inference.
-    """
-
-    try:
-        from dotenv import load_dotenv  # type: ignore
-
-        load_dotenv()
-    except ModuleNotFoundError:
-        # Environment variables can be provided by the platform/container.
-        return
-    except Exception as e:
-        print(f"⚠️  Failed to load .env: {e}")
-
-
-_safe_load_dotenv()
 
 MAX_STEPS = 10
 TASKS = ["stable", "volatile", "war"]
 
-client = None
-API_BASE_URL = os.getenv("API_BASE_URL", "")
-HF_TOKEN = os.getenv("HF_TOKEN")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
-
-try:
-    from openai import OpenAI
-
-    if API_BASE_URL and HF_TOKEN:
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=HF_TOKEN,
-        )
-        print("✅ OpenAI client initialized with API credentials")
-    else:
-        print(
-            "⚠️  No API credentials (API_BASE_URL / HF_TOKEN). "
-            "Running with baseline policy."
-        )
-except Exception as e:
-    print(f"⚠️  Could not initialize OpenAI client: {e}. Running with baseline policy.")
-    client = None
-
-if client is None:
-    MODEL_NAME = "baseline"
-
-
-# --- Baseline policy (no LLM) ---
+# --- Baseline policy ---
 def baseline_policy(state_dict):
     t = state_dict["time_step"]
     demand = state_dict["demand_forecast"][t] if t < len(state_dict["demand_forecast"]) else 100
@@ -104,69 +53,7 @@ def baseline_policy(state_dict):
     return {"type": "wait", "parameters": {}}
 
 
-# --- LLM-based action selection ---
-VALID_ACTIONS = {
-    "wait": {"type": "wait", "parameters": {}},
-    "store": {"type": "store", "parameters": {"amount": 20}},
-    "hedge": {"type": "hedge", "parameters": {}},
-    "release_20": {"type": "release", "parameters": {"amount": 20}},
-    "release_50": {"type": "release", "parameters": {"amount": 50}},
-    "release": {"type": "release", "parameters": {"amount": 20}},
-    "reroute": {
-        "type": "reroute",
-        "parameters": {"ship_id": 1, "new_route": "Atlantic"},
-    },
-}
-
-
-def llm_select_action(state_dict):
-    if client is None:
-        return baseline_policy(state_dict)
-
-    t = state_dict["time_step"]
-    demand_val = state_dict["demand_forecast"][t] if t < len(state_dict["demand_forecast"]) else 100
-
-    prompt = f"""You must choose ONE action for an LNG supply chain.
-
-Allowed actions: wait, store, hedge, release_20, release_50, reroute
-
-State:
-Demand: {demand_val:.1f}
-Storage: {state_dict['storage']['level']:.1f}
-Blocked routes: {state_dict.get('blocked_routes', [])}
-
-Rules:
-- Output ONLY one word from the list
-- Do NOT explain
-
-Answer:"""
-
-    try:
-        completion = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are an LNG supply chain manager. Reply with exactly one action word."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.0,
-            max_tokens=10,
-        )
-        text = (completion.choices[0].message.content or "").strip().lower()
-
-        # Parse response
-        for key in VALID_ACTIONS:
-            if key in text:
-                return VALID_ACTIONS[key]
-
-        # Fallback to baseline
-        return baseline_policy(state_dict)
-
-    except Exception:
-        return baseline_policy(state_dict)
-
-
 def run_task(task_name):
-    """Run inference on a single task configuration."""
     config = {
         "max_steps": MAX_STEPS,
         "reward": {
@@ -179,8 +66,10 @@ def run_task(task_name):
             "gamma": 2.0,
         },
     }
+
     env = LNGEnv(config=config, task_config=get_task_config(task_name))
     state = env.reset(seed=42)
+
     history = []
     step = 0
     done = False
@@ -188,8 +77,7 @@ def run_task(task_name):
     while not done and step < MAX_STEPS:
         state_dict = state.model_dump()
 
-        # Select action using LLM or baseline
-        action_dict = llm_select_action(state_dict)
+        action_dict = baseline_policy(state_dict)
 
         action = Action(
             action_type=action_dict["type"],
@@ -197,12 +85,16 @@ def run_task(task_name):
             ship_id=action_dict.get("parameters", {}).get("ship_id"),
             new_route=action_dict.get("parameters", {}).get("new_route"),
         )
-        state, reward, done, info = env.step(action)
-        history.append({"reward": reward.value, "metrics": info.get("metrics", {})})
 
-        print(
-            f"  [Step {step + 1:2d}] {action_dict['type']:8s} → reward: {reward.value:7.3f}"
-        )
+        state, reward, done, info = env.step(action)
+
+        history.append({
+            "reward": reward.value,
+            "metrics": info.get("metrics", {})
+        })
+
+        # ✅ STRICT FORMAT
+        print(f"[STEP] step={step+1} reward={reward.value}", flush=True)
 
         step += 1
 
@@ -212,32 +104,22 @@ def run_task(task_name):
 
 def main():
     if _CORE_IMPORT_ERROR is not None:
-        missing = getattr(_CORE_IMPORT_ERROR, "name", None) or "unknown"
-        print(
-            "❌ Missing required dependency while importing project modules: "
-            f"{missing}.\n"
-            "This usually means the validator did not install your Python deps.\n"
-            "Add a root requirements.txt (at least numpy + pydantic) and resubmit."
-        )
-        # Exit cleanly (no unhandled exception) to satisfy fail-fast validators.
-        return
-
-    print("START")
-    print(f"Model: {MODEL_NAME}")
-    print(f"Steps per episode: {MAX_STEPS}")
-    print(f"Tasks: {', '.join(TASKS)}")
+        return  # fail silently (validator requirement)
 
     for task_name in TASKS:
+        # ✅ STRICT FORMAT
+        print(f"[START] task={task_name}", flush=True)
+
         try:
             result = run_task(task_name)
             score = result["final_score"]
-            print(f"STEP: {task_name}")
-            print(f"Score: {score:.3f}")
-        except Exception as e:
-            print(f"STEP: {task_name}")
-            print(f"Score: 0.000")
+            steps = result["steps"]
 
-    print("END")
+            # ✅ STRICT FORMAT
+            print(f"[END] task={task_name} score={score} steps={steps}", flush=True)
+
+        except Exception:
+            print(f"[END] task={task_name} score=0.0 steps=0", flush=True)
 
 
 if __name__ == "__main__":
