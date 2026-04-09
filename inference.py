@@ -1,10 +1,25 @@
 import os
 import json
+import sys
+from pathlib import Path
+from typing import Optional
 
-from src.lng_geoenv.env import LNGEnv
-from src.lng_geoenv.tasks import get_task_config
-from src.lng_geoenv.models import Action
-from src.lng_geoenv.evaluator import evaluate_episode
+# Ensure imports work even if the validator runs `python /tmp/workspace/inference.py`
+# from a different working directory.
+_REPO_ROOT = Path(__file__).resolve().parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+_CORE_IMPORT_ERROR: Optional[ModuleNotFoundError] = None
+try:
+    from src.lng_geoenv.env import LNGEnv
+    from src.lng_geoenv.tasks import get_task_config
+    from src.lng_geoenv.models import Action
+    from src.lng_geoenv.evaluator import evaluate_episode
+except ModuleNotFoundError as e:
+    # Hackathon validators often execute in a clean env; if dependencies
+    # aren't installed (e.g., numpy/pydantic), importing the env will fail.
+    _CORE_IMPORT_ERROR = e
 
 
 def _safe_load_dotenv() -> None:
@@ -196,6 +211,17 @@ def run_task(task_name):
 
 
 def main():
+    if _CORE_IMPORT_ERROR is not None:
+        missing = getattr(_CORE_IMPORT_ERROR, "name", None) or "unknown"
+        print(
+            "❌ Missing required dependency while importing project modules: "
+            f"{missing}.\n"
+            "This usually means the validator did not install your Python deps.\n"
+            "Add a root requirements.txt (at least numpy + pydantic) and resubmit."
+        )
+        # Exit cleanly (no unhandled exception) to satisfy fail-fast validators.
+        return
+
     print("START")
     print(f"Model: {MODEL_NAME}")
     print(f"Steps per episode: {MAX_STEPS}")
