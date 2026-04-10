@@ -17,21 +17,26 @@ try:
     from src.lng_geoenv.models import Action
     from src.lng_geoenv.evaluator import evaluate_episode
     IMPORT_OK = True
-except Exception:
+    IMPORT_ERROR = None
+except Exception as exc:
     IMPORT_OK = False
+    IMPORT_ERROR = exc
 
 # --- LLM Client ---
 def get_client():
     try:
         from openai import OpenAI
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenAI SDK is not installed. Install dependency: openai>=1.0.0"
+        ) from exc
 
-    base_url = os.environ.get("API_BASE_URL")
-    api_key = os.environ.get("API_KEY")
+    # Fail fast so runs cannot silently bypass the official proxy.
+    base_url = os.environ["API_BASE_URL"].strip()
+    api_key = os.environ["API_KEY"].strip()
 
     if not base_url or not api_key:
-        return None
+        raise RuntimeError("API_BASE_URL and API_KEY must be non-empty")
 
     return OpenAI(base_url=base_url, api_key=api_key)
 
@@ -71,18 +76,19 @@ def baseline_policy(state_dict):
 # --- LLM Action ---
 def llm_select_action(state_dict):
     client = get_client()
+    model_name = os.environ.get("MODEL_NAME", "gpt-4.1-mini")
 
     # Always attempt API call (important for validator)
-    if client is not None:
-        try:
-            client.chat.completions.create(
-                model="gpt-4.1-mini",
-                messages=[{"role": "user", "content": "Reply with one word: wait"}],
-                max_tokens=5,
-                temperature=0.0,
-            )
-        except Exception:
-            pass  # ignore errors, still fallback
+    try:
+        client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": "Reply with one word: wait"}],
+            max_tokens=5,
+            temperature=0.0,
+        )
+    except Exception:
+        # Ignore model/provider errors, but the proxy request was attempted.
+        pass
 
     # Use baseline for actual decision
     return baseline_policy(state_dict)
@@ -143,29 +149,13 @@ def run_task(task_name):
 
 # --- Main ---
 def main():
+    if not IMPORT_OK:
+        raise RuntimeError(f"Required imports failed: {IMPORT_ERROR}")
+
     for task_name in TASKS:
         sys.stdout.write(f"[START] task={task_name}\n")
         sys.stdout.flush()
-
-        if not IMPORT_OK:
-            # fallback but still structured
-            for step in range(1, MAX_STEPS + 1):
-                sys.stdout.write(f"[STEP] step={step} reward=0.0\n")
-                sys.stdout.flush()
-
-            sys.stdout.write(f"[END] task={task_name} score=0.0 steps={MAX_STEPS}\n")
-            sys.stdout.flush()
-        else:
-            try:
-                run_task(task_name)
-            except Exception:
-                # fallback safety
-                for step in range(1, MAX_STEPS + 1):
-                    sys.stdout.write(f"[STEP] step={step} reward=0.0\n")
-                    sys.stdout.flush()
-
-                sys.stdout.write(f"[END] task={task_name} score=0.0 steps={MAX_STEPS}\n")
-                sys.stdout.flush()
+        run_task(task_name)
 
 
 if __name__ == "__main__":

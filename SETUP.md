@@ -2,21 +2,18 @@
 
 ## Quick Start
 
-### 1. Get API Key
-- Go to: https://aistudio.google.com/app/apikeys
-- Create new API key
-
-### 2. Configure
+### 1. Configure
 ```bash
 cp .env.example .env
-# Edit .env and add your API key:
-# GEMINI_API_KEY=sk-your-key-here
-# AGENT_ENABLED=1
+# Edit .env and use the injected hackathon proxy values:
+# API_BASE_URL=https://...
+# API_KEY=...
+# MODEL_NAME=gpt-4.1-mini
 ```
 
-### 3. Run
+### 2. Run
 ```bash
-python main.py
+python inference.py
 ```
 
 ## Usage
@@ -29,10 +26,9 @@ python main.py
 ## Configuration (.env)
 
 ```bash
-GEMINI_API_KEY=sk-...              # Your API key (REQUIRED)
-AGENT_ENABLED=1                     # 1=on, 0=off
-AGENT_TEMPERATURE=0.7               # 0.0-2.0 (creativity/consistency)
-LOG_LEVEL=INFO                      # DEBUG, INFO, WARNING, ERROR, CRITICAL
+API_BASE_URL=https://...            # REQUIRED: provided by validator
+API_KEY=...                         # REQUIRED: provided by validator
+MODEL_NAME=gpt-4.1-mini             # Optional override
 ```
 
 ## Core Features
@@ -89,10 +85,10 @@ LOG_LEVEL=INFO                      # DEBUG, INFO, WARNING, ERROR, CRITICAL
 
 | Issue | Fix |
 |-------|-----|
-| API key not found | Add `GEMINI_API_KEY=...` to .env |
-| Import error | `pip install google-generativeai` |
+| API vars not found | Add `API_BASE_URL` and `API_KEY` |
+| Import error | `pip install openai` |
 | Always "wait" action | Already working - baseline is conservative |
-| Timeout | Increase `AGENT_TIMEOUT=60` in .env |
+| Timeout | Use a smaller model via `MODEL_NAME` |
 
 ## Files
 
