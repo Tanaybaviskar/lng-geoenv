@@ -1317,6 +1317,7 @@ dependencies = [
     { name = "gradio" },
     { name = "huggingface-hub" },
     { name = "numpy" },
+    { name = "openai" },
     { name = "openenv" },
     { name = "openenv-core" },
     { name = "pydantic" },
@@ -1332,7 +1333,6 @@ dev = [
 inference = [
     { name = "google-genai" },
     { name = "google-generativeai" },
-    { name = "openai" },
 ]
 
 [package.metadata]
@@ -1343,7 +1343,7 @@ requires-dist = [
     { name = "gradio", specifier = ">=4.0.0" },
     { name = "huggingface-hub", extras = ["cli"], specifier = ">=1.8.0" },
     { name = "numpy", specifier = ">=2.4.3" },
-    { name = "openai", marker = "extra == 'inference'", specifier = ">=1.0.0" },
+    { name = "openai", specifier = ">=1.0.0" },
     { name = "openenv", specifier = ">=0.1.13" },
     { name = "openenv-core", specifier = ">=0.2.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
